@@ -1008,11 +1008,28 @@ That fact sets the security bar, single user or not.
 - **Browser.** CSP with no `unsafe-inline`, `frame-ancestors 'none'`,
   strict `Referrer-Policy`, `SameSite=Lax` session cookie. CSRF uses
   double-submit: at login the `oauth` Lambda sets a second, **non-`HttpOnly`**
-  `sundial_csrf` cookie holding a random 32-byte token; the SPA reads it and
-  echoes it in an `X-CSRF-Token` header on every mutating request, and the
-  Lambda authorizer rejects any state-changing call where header and cookie
-  disagree. `SameSite=Lax` already blocks the cross-site form-post case; this
-  covers the rest.
+  `sundial_csrf` cookie holding a random 32-byte token, and the SPA reads it
+  and echoes it in an `X-CSRF-Token` header on every mutating request.
+  `SameSite=Lax` already blocks the cross-site form-post case; this covers the
+  rest.
+
+  **The comparison happens in the application, not in the Lambda authorizer.**
+  The authorizer validates the session JWT and nothing else. This split is
+  forced by the authorizer's cache and is not a matter of taste: an HTTP API
+  authorizer caches its verdict against `identitySource` for 300s (§5.1), so
+  either the CSRF header is part of that key — and every `GET`, which carries
+  no such header, is rejected by API Gateway for a missing identity source
+  before the authorizer is even invoked — or it is not, and a single failed
+  `POST` caches a denial that locks out reads for the next five minutes. Both
+  failure modes are intermittent and would be miserable to diagnose. Being
+  per-request is the whole point of the check, and the authorizer is the one
+  place in the stack that is deliberately not per-request.
+
+  `identitySource` is therefore `$request.header.Cookie` alone. The
+  application rejects any state-changing call where header and cookie are
+  absent or disagree, with the exception of `/api/auth/login` and
+  `/api/auth/callback` — which is where the token comes from — and the Google
+  webhook, which has no session at all and is validated by channel token.
 - **Secrets inventory** (four, per §4.2): the Google OAuth client secret, the
   Anthropic API key, the RS256 session-signing private key (§5.1), and the
   VAPID private key (§9.1). The Google *refresh* token is not among them — it

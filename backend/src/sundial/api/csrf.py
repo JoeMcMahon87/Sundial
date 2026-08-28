@@ -1,12 +1,12 @@
 """CSRF double-submit enforcement (§12).
 
-**Deviation from §12, deliberate and flagged.** The spec places this check in
-the Lambda authorizer. It cannot live there: an HTTP API authorizer caches its
-result against ``identitySource``, so either the CSRF header is part of that
-key — in which case every GET, which carries no such header, is rejected for a
-missing identity source — or it is not, in which case one failed POST caches a
-denial for 300s and locks out subsequent reads. The check belongs in the app,
-where it is per-request by construction. The authorizer keeps the JWT half.
+The comparison lives here rather than in the Lambda authorizer, which §12 sets
+out in full: an HTTP API authorizer caches its result against
+``identitySource`` for 300s, so either the CSRF header is part of that key — in
+which case every GET, carrying no such header, is rejected for a missing
+identity source — or it is not, in which case one failed POST caches a denial
+that locks out subsequent reads. The check has to be per-request, which the
+authorizer deliberately is not. The authorizer keeps the JWT half.
 """
 
 from __future__ import annotations

@@ -166,12 +166,12 @@ Verified against current docs — do not "fix" these from memory:
 - Overcommitment is reported, never silently absorbed (§7.5).
 - Offline is read-only in v1 by design; mutations are disabled, not queued
   (§10.4).
-- CSRF is enforced in FastAPI middleware, **not in the Lambda authorizer** as
-  §12 says. This is a known spec/code disagreement, not drift: an HTTP API
-  authorizer caches against `identitySource`, so putting the CSRF header in
-  that key rejects every GET for a missing identity source, and leaving it out
-  lets one failed POST cache a denial for 300s. See `sundial/api/csrf.py`.
-  **§12 needs amending to match; until it is, the code is the correct side.**
+- CSRF is enforced in FastAPI middleware, not in the Lambda authorizer, and
+  §12 now says so explicitly. Do not "fix" this by moving the check into the
+  authorizer: it caches against `identitySource` for 300s, so including the
+  CSRF header in that key rejects every GET for a missing identity source, and
+  excluding it lets one failed POST cache a denial over subsequent reads. The
+  check has to be per-request; the authorizer deliberately is not.
 - Both `api` and `oauth` are the same FastAPI app behind two Lambdas with
   different IAM roles. That is what makes §12's "the `api` role cannot decrypt
   the Google secret at all" enforceable rather than aspirational —
