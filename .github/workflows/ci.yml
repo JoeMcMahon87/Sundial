@@ -1,9 +1,12 @@
 name: CI
 
+# Every branch, because this repo's default branch is not `main` and work
+# lands by pushing to a branch rather than by opening a PR. A `pull_request`
+# trigger is deliberately absent: for same-repo branches it would only
+# duplicate the push run. Add it back if PRs from forks ever need checks.
 on:
-  pull_request:
   push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
