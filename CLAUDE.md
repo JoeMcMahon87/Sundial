@@ -1,0 +1,178 @@
+# CLAUDE.md — Sundial
+
+Single-user day-management app: calendar + todos + email-derived tasks on one
+screen, which then time-blocks the work onto a real Google Calendar.
+
+**`docs/SPEC.md` is the source of truth.** It is detailed and current (v0.2).
+Read the relevant section before implementing — do not infer behaviour from
+neighbouring code, and if code and spec disagree, that is a bug in one of them:
+say so rather than quietly picking a side.
+
+**Status: M0a in progress.** The three decisions that blocked the first commit
+are settled (§16). Sections below that still describe intent rather than
+reality are marked; correct them as M0 lands.
+
+## Settled, do not re-litigate
+
+1. **OAuth publishing: option A** — Production, unverified. This is a manual
+   Cloud Console step for *both* the `dev` and `prod` clients, with no API, so
+   it cannot live in CDK. It belongs in the M0 runbook and must happen before
+   the first real OAuth round-trip. Leaving a client in "Testing" gives refresh
+   tokens a **7-day** life and breaks background sync in every phase.
+2. **Scopes are staged.** Request calendar scopes only until M5; add the
+   restricted Gmail scopes when J3 lands. Do not add `gmail.*` to the client
+   or the consent request before then.
+3. **Domain deferred; localhost first.** Develop against
+   `http://localhost:5173` via the Vite dev-server proxy. M0b — hosted zone,
+   ACM cert, CloudFront, production redirect URI — is blocked until a domain
+   exists (§15.1). Do not hardcode a hostname anywhere; it comes from SSM.
+4. **One AWS account, two environments.** `dev` and `prod` differ by resource
+   suffix and SSM path `/sundial/<env>/...`, not by account. Separate Google
+   OAuth clients per environment still applies.
+
+## Toolchain
+
+| Layer | Choice |
+|---|---|
+| Backend | Python 3.13, FastAPI + Mangum, Lambda on ARM64 |
+| Frontend | React 19 + TypeScript + Vite, `vite-plugin-pwa` |
+| Infra | AWS CDK (Python), two stacks: `SundialInfra` (durable), `SundialApp` |
+| Data | DynamoDB single table `sundial` |
+| Lint/test | `ruff`, `mypy`, `pytest` + `hypothesis` + `moto`; `eslint`, `tsc`, Playwright |
+
+```
+infra/      CDK app (Python) — SundialInfra + SundialApp, template assertions
+backend/    src/sundial/{api,core,oauth,sync_cal,sync_gmail,scheduler,reminders,brief,llm}/
+frontend/   React PWA
+scripts/    runbook helpers that cannot live in CDK
+docs/       SPEC.md, RUNBOOK-M0.md
+```
+
+Only `api`, `core`, and `oauth` have code in them; the rest are empty packages
+waiting on their milestone.
+
+## Commands
+
+| | |
+|---|---|
+| `make install` | set up all three toolchains (uv ×2, npm) |
+| `make check` | everything CI runs: ruff, mypy, pytest, eslint, tsc |
+| `make build` | build the ARM64 Lambda asset into `backend/dist/lambda` |
+| `make synth` | `cdk synth` both stacks for `dev` |
+| `make dev-api` / `make dev-web` | uvicorn on :8000, Vite on :5173 |
+
+`make synth` depends on `make build` because `SundialApp` reads the Lambda asset
+from disk. `cdk synth` must pass with no AWS credentials — every SSM read is a
+deploy-time token, never a synth-time lookup.
+
+Local development talks to the **real dev AWS environment** for DynamoDB, KMS,
+and Secrets Manager; see `docs/RUNBOOK-M0.md`. The test suite does not — it runs
+entirely against moto.
+
+## Invariants — these are the ones that get broken
+
+Each is a real failure mode, not style. Section refs are to `docs/SPEC.md`.
+
+1. **`Event.origin` is immutable and decides authority.** `sundial` → Sundial
+   writes to Google. `google` → Google overwrites Sundial, always. There is
+   exactly one writer per event: no merge, no last-write-wins (§2.1). The one
+   refinement is §6.5 — a Sundial *block* dragged in Google is adopted and
+   locked, not reverted.
+
+2. **Check `is_own_echo` before concluding drift (§6.4.1).** Sundial's own
+   write to Google fires the watch notification for that write. Without echo
+   suppression every block marks itself `locked = true` within seconds and the
+   scheduler goes inert by day two. Persist the etag from the write *response*
+   in the same commit, and compare `sundial_rev` from `extendedProperties`.
+   Both, not either. This will never fail a unit test — it needs a round-trip.
+
+3. **Google event ids are base32hex, ULIDs are Crockford base32.** Lowercasing
+   a ULID is not enough (`w`,`x`,`y`,`z` are out of range) and fails on ~a
+   third of ids, intermittently. Decode to raw 128 bits, re-encode (§6.4).
+
+4. **A deleted Google event id is retired forever.** Reuse returns `409`.
+   Reclaiming a deleted block's time mints a *new* `event_id` (§6.4).
+
+5. **Moving a block is delete + put.** The Event sort key embeds `iso_start`,
+   so a reschedule is a `TransactWriteItems` pair, never an `UpdateExpression`
+   on `start` (§3.2).
+
+6. **Filter `deleted_at = null` on every read.** Soft-deleted events stay in
+   the sort-key range. Missing the filter shows up as phantom busy time, not as
+   an error (§3.2).
+
+7. **Everything Sundial writes goes to the `Sundial` calendar and nowhere
+   else** (§6.1). This is what makes the whole design safe to get wrong.
+
+8. **No LLM in the scheduler.** Claude estimates effort; placement is
+   arithmetic and must be reproducible and instant (§7). Rerunning on unchanged
+   input must produce an empty diff.
+
+9. **No magic numbers in scheduler code.** Every weight, window, buffer, and
+   cap lives in `SchedulingPolicy` (§3.1). If you need a constant the policy
+   doesn't have, add it to the policy.
+
+10. **Nothing from Gmail is ever auto-accepted** (§8.2), Claude never gets a
+    write path or tools (§8.5), and **email bodies are never persisted** —
+    subject, sender, snippet, and message id only (§12).
+
+11. **Store UTC; also store the IANA zone the event was authored in** (§6.7).
+    The scheduler reasons in the user's *current* zone. All-day events are
+    date-only and never converted.
+
+12. **J1 must stand alone.** If auto-scheduling, triage, and push are all off,
+    Sundial is still a good calendar + todo app (§1.1). Never make a J1 path
+    depend on J2–J4.
+
+## Claude API usage
+
+Verified against current docs — do not "fix" these from memory:
+
+- Models: `claude-opus-5` ($5/$25 per MTok), `claude-haiku-4-5` ($1/$5).
+  Per-call-site config: `TRIAGE_MODEL`, `PARSE_MODEL`, `BRIEF_MODEL` (§8.4).
+- `thinking={"type": "adaptive"}`. **`budget_tokens` is removed and returns a
+  400** on Opus 5.
+- Effort goes *inside* `output_config`: `output_config={"effort": "low",
+  "format": {"type": "json_schema", "schema": ...}}`. Not top-level, and not
+  the deprecated `output_format`.
+- **Always check `stop_reason == "refusal"` before reading `content`.** Email
+  bodies are untrusted input; a refusal is HTTP 200 with no usable content, so
+  unchecked code sees a batch that silently triaged nothing (§8.2).
+- Prompt caching needs a **~1024-token minimum prefix** or it silently no-ops.
+  Assert `usage.cache_read_input_tokens > 0` on repeat calls.
+- Adaptive thinking is on by default and thinking tokens bill as output; the
+  §8.4 estimate does not include them.
+
+## Working style here
+
+- Match the spec's vocabulary exactly: task, block, appointment, foreign event,
+  candidate, policy, horizon (Appendix A). Do not invent synonyms.
+- Timezone and DST edges are fixtures, not afterthoughts — the spring-forward
+  day is a required test case (§14).
+- The scheduler gets property-based tests: no overlaps, nothing outside working
+  windows, no unflagged placement past a due date, idempotence (§14).
+- Structured JSON logs with a correlation id. **Never log** email bodies,
+  tokens, or full event titles at INFO (§12).
+- No credentials in the repo. CDK reads config from SSM Parameter Store; CI
+  deploys via an OIDC-federated role (§12).
+- Destroying `SundialApp` must never take data with it (§13).
+
+## Things that look like bugs but aren't
+
+- The `sundial` calendar is the only write target, so Sundial appearing to
+  "ignore" your work calendar is correct behaviour.
+- A large replan is surfaced as a *proposal* rather than applied when the diff
+  exceeds 40% of remaining blocks (§7.3).
+- Overcommitment is reported, never silently absorbed (§7.5).
+- Offline is read-only in v1 by design; mutations are disabled, not queued
+  (§10.4).
+- CSRF is enforced in FastAPI middleware, **not in the Lambda authorizer** as
+  §12 says. This is a known spec/code disagreement, not drift: an HTTP API
+  authorizer caches against `identitySource`, so putting the CSRF header in
+  that key rejects every GET for a missing identity source, and leaving it out
+  lets one failed POST cache a denial for 300s. See `sundial/api/csrf.py`.
+  **§12 needs amending to match; until it is, the code is the correct side.**
+- Both `api` and `oauth` are the same FastAPI app behind two Lambdas with
+  different IAM roles. That is what makes §12's "the `api` role cannot decrypt
+  the Google secret at all" enforceable rather than aspirational —
+  `infra/tests/test_app_stack.py` asserts it.

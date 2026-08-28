@@ -7,18 +7,35 @@ actually going to do the work, defending that decision on your real calendar.
 Deployed to AWS, used from a browser on desktop and phone, reads and writes
 Google Calendar and Gmail.
 
-**Status: specification. No code yet.**
+**Status: M0a — foundations.** Auth, storage, and the deploy pipeline exist;
+no calendar or tasks yet.
 
 ## Read this first
 
 - [`docs/SPEC.md`](docs/SPEC.md) — the full technical specification.
+- [`docs/RUNBOOK-M0.md`](docs/RUNBOOK-M0.md) — first-run setup, including the
+  two Google Cloud Console steps that have no API and cannot live in CDK.
+- [`CLAUDE.md`](CLAUDE.md) — implementation guidance and the invariants that
+  are easy to get wrong.
 
-Two sections need your attention before implementation starts:
+## Running it
 
-- **§5.3 — the Google OAuth verification problem.** The one external
-  constraint that can't be engineered around, with three options and a
-  recommendation.
-- **§16 — open questions.** Six decisions still outstanding.
+```sh
+make install    # uv ×2, npm
+make check      # ruff, mypy, pytest, eslint, tsc
+make dev-api    # :8000
+make dev-web    # :5173
+```
+
+Local development needs AWS credentials for the `dev` environment — the table,
+the KMS key, and two secrets are real. The test suite does not; it runs against
+moto.
+
+## What is left in M0
+
+The domain (§16 decision 2). Route 53, ACM, CloudFront, and the production
+redirect URI all derive from it, and M0 is not done until you can sign in on
+your phone and see "connected" — which needs them.
 
 ## Shape of the thing
 
@@ -29,4 +46,4 @@ Two sections need your attention before implementation starts:
 | Data | DynamoDB, single table |
 | Infra | AWS CDK (Python) — CloudFront, S3, API Gateway HTTP API, EventBridge Scheduler, SQS, SES, KMS |
 | External | Google Calendar v3, Gmail v1, Anthropic API (Claude) |
-| Cost | ~$7–13/month, single user |
+| Cost | ~$8–14/month, single user |

@@ -1,0 +1,84 @@
+:root {
+  color-scheme: dark light;
+  --bg: #1c1917;
+  --fg: #fafaf9;
+  --muted: #a8a29e;
+  --accent: #f59e0b;
+  --error: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, sans-serif;
+}
+
+main {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: max(2rem, env(safe-area-inset-top)) 1.25rem 2rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--error);
+}
+
+.button,
+button {
+  display: inline-block;
+  padding: 0.6rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: #1c1917;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button {
+  background: transparent;
+  border-color: var(--muted);
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot-connected {
+  background: #4ade80;
+}
+
+.dot-needs_reconnect {
+  background: var(--accent);
+}
+
+.dot-disconnected {
+  background: var(--muted);
+}

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# CDK
+cdk.out/
+.cdk.staging/
+
+# Local environment — never commit credentials (§12)
+.env
+.env.*
+!.env.example
+
+# Tooling
+.serena/
+.claude/settings.local.json
+.claude/.headroom_wrap_marker.json
+
+# OS
+.DS_Store
