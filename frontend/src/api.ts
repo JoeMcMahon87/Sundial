@@ -68,8 +68,34 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
 }
 
+export type Origin = 'sundial' | 'google'
+export type EventKind = 'appointment' | 'block' | 'busy'
+
+export interface CalendarEvent {
+  event_id: string
+  origin: Origin
+  kind: EventKind
+  title: string
+  /** A UTC instant when timed, a bare `YYYY-MM-DD` when all-day (§6.7). */
+  start: string
+  end: string
+  all_day: boolean
+  tz: string
+  location: string | null
+  transparency: 'busy' | 'free'
+  locked: boolean
+  task_id: string | null
+  calendar_id: string
+}
+
 export const api = {
   me: () => request<Me>('/me'),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   loginUrl: '/api/auth/login',
+
+  events: (from: Date, to: Date, timeZone: string) =>
+    request<{ events: CalendarEvent[] }>(
+      `/events?from=${from.toISOString()}&to=${to.toISOString()}` +
+        `&timezone=${encodeURIComponent(timeZone)}`,
+    ),
 }

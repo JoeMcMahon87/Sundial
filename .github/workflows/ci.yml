@@ -49,6 +49,7 @@ jobs:
       - run: npm ci
       - run: npx eslint .
       - run: npx tsc -b --noEmit
+      - run: npm test
       - run: npm run build
 
   infra:

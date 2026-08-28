@@ -17,7 +17,7 @@ backend-check:
 		&& .venv/bin/mypy && .venv/bin/python -m pytest -q
 
 frontend-check:
-	cd frontend && npx eslint . && npx tsc -b --noEmit
+	cd frontend && npx eslint . && npx tsc -b --noEmit && npm test
 
 infra-check:
 	cd infra && .venv/bin/ruff check . && .venv/bin/ruff format --check . \

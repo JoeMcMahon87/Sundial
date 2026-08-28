@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, api, type Me } from './api'
+import { ApiError, api, type Me } from '../api'
 
 type State =
   | { status: 'loading' }
