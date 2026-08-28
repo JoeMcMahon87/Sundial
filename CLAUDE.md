@@ -29,6 +29,13 @@ reality are marked; correct them as M0 lands.
 4. **One AWS account, two environments.** `dev` and `prod` differ by resource
    suffix and SSM path `/sundial/<env>/...`, not by account. Separate Google
    OAuth clients per environment still applies.
+5. **The domain is `sundial.mcmahongroup.org`, and its DNS is not in AWS.**
+   There is no Route 53 hosted zone; records are added at the registrar by
+   hand. The ACM certificate is therefore issued out of band and *referenced*
+   by ARN — **never create one in a stack**, because DNS validation would
+   block the deploy until a record CloudFormation cannot write appears
+   (§15.2). `dev` has no hostname at all and needs neither DNS nor a
+   certificate.
 
 ## Toolchain
 
@@ -83,6 +90,11 @@ at the moment something interesting was happening.
 | `make build` | build the ARM64 Lambda asset into `backend/dist/lambda` |
 | `make synth` | `cdk synth` both stacks for `dev` |
 | `make dev-api` / `make dev-web` | uvicorn on :8000, Vite on :5173 |
+
+Deploys run from `.github/workflows/deploy.yml`; setup is
+`docs/RUNBOOK-DEPLOY.md`. Deploy is a **separate workflow from CI on purpose**:
+it holds `id-token: write`, which is permission to mint AWS credentials, and
+the workflow that runs third-party lint and test code must never hold it.
 
 `make synth` depends on `make build` because `SundialApp` reads the Lambda asset
 from disk. `cdk synth` must pass with no AWS credentials — every SSM read is a

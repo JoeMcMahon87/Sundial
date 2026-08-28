@@ -5,6 +5,14 @@
     "exclude": ["README.md", "cdk*.json", "**/__pycache__", "tests", ".venv"]
   },
   "context": {
+    "repository": "JoeMcMahon87/Sundial",
+
+    "//": "prod carries the custom hostname; dev uses the CloudFront domain and",
+    "// ": "therefore needs neither DNS nor a certificate. Pass both on the",
+    "//  ": "command line for prod: -c domain_name=... -c certificate_arn=...",
+    "domain_name": "",
+    "certificate_arn": "",
+
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/aws-iam:minimizePolicies": true,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import aws_cdk as cdk
 
 from sundial_infra.app_stack import SundialApp
+from sundial_infra.cicd_stack import SundialCicd
 from sundial_infra.infra_stack import SundialInfra
 from sundial_infra.naming import ENVIRONMENTS
 
@@ -22,6 +23,15 @@ if env_name not in ENVIRONMENTS:
 env = cdk.Environment(
     account=app.node.try_get_context("account"),
     region=app.node.try_get_context("region") or "us-east-1",
+)
+
+# Deployed once, by hand, from an admin session — it cannot be deployed by
+# the pipeline whose roles it creates.
+SundialCicd(
+    app,
+    "SundialCicd",
+    repository=app.node.try_get_context("repository") or "JoeMcMahon87/Sundial",
+    env=env,
 )
 
 infra = SundialInfra(app, f"SundialInfra-{env_name}", env_name=env_name, env=env)

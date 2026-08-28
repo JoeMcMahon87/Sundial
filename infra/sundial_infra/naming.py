@@ -21,3 +21,8 @@ def param(env: str, name: str) -> str:
 
 def secret_name(env: str, name: str) -> str:
     return f"sundial/{env}/{name}"
+
+
+def site_bucket(env: str, account: str) -> str:
+    """Bucket names are globally unique, so the account id is part of it."""
+    return f"sundial-site-{env}-{account}"

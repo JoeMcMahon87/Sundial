@@ -12,15 +12,19 @@ from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_apigatewayv2 as apigw
 from aws_cdk import aws_apigatewayv2_authorizers as authorizers
 from aws_cdk import aws_apigatewayv2_integrations as integrations
+from aws_cdk import aws_certificatemanager as acm
+from aws_cdk import aws_cloudfront as cloudfront
+from aws_cdk import aws_cloudfront_origins as origins
 from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_kms as kms
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
-from sundial_infra.naming import param
+from sundial_infra.naming import param, site_bucket
 
 LAMBDA_ASSET = "../backend/dist/lambda"
 """Built by ``backend/build.sh`` before synth; see infra/README.md."""
@@ -151,5 +155,131 @@ class SundialApp(Stack):
 
         self.sync_cal_fn.add_environment("SUNDIAL_LOG_LEVEL", "INFO")
 
+        self._add_distribution(env_name)
+
         CfnOutput(self, "ApiEndpoint", value=self.http_api.api_endpoint)
         CfnOutput(self, "SyncCalFunctionName", value=self.sync_cal_fn.function_name)
+        CfnOutput(self, "SiteBucketName", value=self.site_bucket.bucket_name)
+        CfnOutput(self, "DistributionId", value=self.distribution.distribution_id)
+        CfnOutput(self, "SiteUrl", value=f"https://{self.site_host}")
+
+    def _add_distribution(self, env_name: str) -> None:
+        """CloudFront in front of both origins (§4.1).
+
+        Serving the SPA and `/api/*` from one origin is what makes the session
+        cookie first-party, which is what makes it survive iOS Safari (§5.1).
+        It is the whole reason this distribution exists.
+        """
+        self.site_bucket = s3.Bucket(
+            self,
+            "SiteBucket",
+            bucket_name=site_bucket(env_name, self.account),
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            # The bucket holds a build artefact and nothing else. Losing it
+            # costs one `npm run build`, so it is not durable infrastructure.
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
+        )
+
+        # Prod carries the custom hostname; dev uses the distribution's own
+        # domain. Dev is same-origin either way, so it needs no DNS and no
+        # certificate — which is what lets it deploy before any DNS exists.
+        domain_name = self.node.try_get_context("domain_name")
+        certificate_arn = self.node.try_get_context("certificate_arn")
+        aliased = bool(domain_name and certificate_arn)
+
+        certificate = (
+            acm.Certificate.from_certificate_arn(self, "SiteCertificate", certificate_arn)
+            if aliased
+            else None
+        )
+
+        headers = cloudfront.ResponseHeadersPolicy(
+            self,
+            "SecurityHeaders",
+            security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
+                content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
+                    # No `unsafe-inline` (§12). `connect-src` is same-origin
+                    # because the API is served from this very distribution.
+                    content_security_policy=(
+                        "default-src 'self'; img-src 'self' data:; "
+                        "style-src 'self'; script-src 'self'; connect-src 'self'; "
+                        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+                    ),
+                    override=True,
+                ),
+                content_type_options=cloudfront.ResponseHeadersContentTypeOptions(
+                    override=True
+                ),
+                frame_options=cloudfront.ResponseHeadersFrameOptions(
+                    frame_option=cloudfront.HeadersFrameOption.DENY, override=True
+                ),
+                referrer_policy=cloudfront.ResponseHeadersReferrerPolicy(
+                    referrer_policy=cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                    override=True,
+                ),
+                strict_transport_security=cloudfront.ResponseHeadersStrictTransportSecurity(
+                    access_control_max_age=Duration.days(365),
+                    include_subdomains=True,
+                    override=True,
+                ),
+            ),
+        )
+
+        api_origin = origins.HttpOrigin(
+            f"{self.http_api.http_api_id}.execute-api.{self.region}.amazonaws.com",
+            protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+        )
+
+        self.distribution = cloudfront.Distribution(
+            self,
+            "Distribution",
+            comment=f"Sundial {env_name}",
+            default_root_object="index.html",
+            # §12 wants TLS 1.2 minimum, and CloudFront only honours that on a
+            # distribution with its own certificate — the default *.cloudfront.net
+            # certificate has a fixed policy. So dev, which has no alias, cannot
+            # enforce it. That is acceptable for dev and must not be for prod.
+            minimum_protocol_version=(
+                cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021 if aliased else None
+            ),
+            domain_names=[domain_name] if aliased else None,
+            certificate=certificate,
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin.with_origin_access_control(self.site_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                response_headers_policy=headers,
+            ),
+            additional_behaviors={
+                "/api/*": cloudfront.BehaviorOptions(
+                    origin=api_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                    # Nothing under /api is cacheable, and the whole design
+                    # depends on cookies reaching the origin intact.
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    response_headers_policy=headers,
+                ),
+            },
+            error_responses=[
+                # The SPA owns routing; a deep link must not 403 from S3.
+                cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                    ttl=Duration.minutes(5),
+                ),
+                cloudfront.ErrorResponse(
+                    http_status=404,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                    ttl=Duration.minutes(5),
+                ),
+            ],
+        )
+
+        self.site_host = domain_name if aliased else self.distribution.distribution_domain_name

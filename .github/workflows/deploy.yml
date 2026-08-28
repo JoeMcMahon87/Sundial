@@ -1,0 +1,222 @@
+name: Deploy
+
+# Deliberately a separate workflow from CI, not extra jobs inside it. Deploying
+# needs `id-token: write`, which is permission to mint AWS credentials; CI runs
+# third-party test and lint code and must never hold it. Keeping them apart is
+# what stops a compromised dev dependency from reaching the account.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to deploy
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  # workflow_run does not check out the triggering commit by default; every
+  # job below pins to it so a deploy always matches the code CI approved.
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  plan:
+    # Only deploy what CI passed on. A failed or cancelled CI run must not
+    # reach AWS.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    outputs:
+      environment: ${{ steps.target.outputs.environment }}
+      infra_changed: ${{ steps.diff.outputs.infra_changed }}
+    steps:
+      - id: target
+        run: echo "environment=${{ github.event.inputs.environment || 'dev' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sundial-deploy-${{ steps.target.outputs.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            infra/pyproject.toml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Build the Lambda asset
+        working-directory: backend
+        run: uv venv --python 3.13 && ./build.sh
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: uv venv --python 3.13 && uv pip install -e ".[dev]"
+
+      # `cdk diff --fail` exits non-zero when there is a change. Gating the
+      # durable stack on that means approving real changes rather than
+      # rubber-stamping a no-op on every push.
+      - id: diff
+        name: Diff
+        working-directory: infra
+        env:
+          TARGET: ${{ steps.target.outputs.environment }}
+        run: |
+          set +e
+          PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 diff \
+            "SundialInfra-$TARGET" -c env="$TARGET" --fail
+          changed=$?
+          set -e
+          echo "infra_changed=$([ $changed -ne 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+          PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 diff \
+            "SundialApp-$TARGET" -c env="$TARGET" \
+            -c domain_name="${{ vars.SITE_DOMAIN_NAME }}" \
+            -c certificate_arn="${{ vars.SITE_CERTIFICATE_ARN }}" || true
+
+  infra:
+    needs: plan
+    if: needs.plan.outputs.infra_changed == 'true'
+    runs-on: ubuntu-latest
+    # A separate environment with required reviewers. The durable stack holds
+    # the table, the KMS key and the secrets, so a change to it is never
+    # applied without someone looking at the diff above (§13).
+    environment: ${{ needs.plan.outputs.environment }}-infra
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sundial-deploy-${{ needs.plan.outputs.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: infra/pyproject.toml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - working-directory: infra
+        run: uv venv --python 3.13 && uv pip install -e ".[dev]"
+      - working-directory: infra
+        env:
+          TARGET: ${{ needs.plan.outputs.environment }}
+        run: |
+          PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 deploy \
+            "SundialInfra-$TARGET" -c env="$TARGET" --require-approval never
+
+  app:
+    needs: [plan, infra]
+    # `always()` so a skipped infra job (the common case: no durable change)
+    # does not skip the deploy that depends on it.
+    if: always() && needs.plan.result == 'success' && needs.infra.result != 'failure'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.plan.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sundial-deploy-${{ needs.plan.outputs.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            infra/pyproject.toml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the Lambda asset
+        working-directory: backend
+        run: uv venv --python 3.13 && ./build.sh
+
+      - name: Deploy SundialApp
+        working-directory: infra
+        env:
+          TARGET: ${{ needs.plan.outputs.environment }}
+        run: |
+          uv venv --python 3.13 && uv pip install -e ".[dev]"
+          PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 deploy \
+            "SundialApp-$TARGET" -c env="$TARGET" \
+            -c domain_name="${{ vars.SITE_DOMAIN_NAME }}" \
+            -c certificate_arn="${{ vars.SITE_CERTIFICATE_ARN }}" \
+            --require-approval never --outputs-file outputs.json
+
+      - id: outputs
+        name: Read stack outputs
+        working-directory: infra
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          stack = f"SundialApp-{os.environ['TARGET']}"
+          data = json.load(open("outputs.json"))[stack]
+          for key in ("SiteBucketName", "DistributionId", "SiteUrl"):
+              print(f"{key}={data[key]}")
+          PY
+        env:
+          TARGET: ${{ needs.plan.outputs.environment }}
+
+      - name: Build the front end
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Publish the front end
+        working-directory: frontend
+        env:
+          BUCKET: ${{ steps.outputs.outputs.SiteBucketName }}
+        run: |
+          # Hashed filenames are immutable and cached for a year; the entry
+          # points must never be, or a deploy is invisible until the cache
+          # expires (§10.1).
+          aws s3 sync dist/ "s3://$BUCKET" --delete \
+            --exclude index.html --exclude sw.js --exclude '*.webmanifest' \
+            --cache-control 'public,max-age=31536000,immutable'
+          aws s3 sync dist/ "s3://$BUCKET" \
+            --exclude '*' --include index.html --include sw.js --include '*.webmanifest' \
+            --cache-control 'no-cache'
+
+      - name: Invalidate the entry points
+        env:
+          DISTRIBUTION: ${{ steps.outputs.outputs.DistributionId }}
+        run: |
+          # Only the uncached entry points. `/*` would be correct and wasteful.
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" \
+            --paths /index.html /sw.js /manifest.webmanifest
+
+      - name: Smoke test
+        env:
+          SITE: ${{ steps.outputs.outputs.SiteUrl }}
+        run: |
+          # The API answering through CloudFront is the thing that actually
+          # proves the two-origin wiring, not the SPA loading.
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$SITE/api/health" | tee /dev/stderr | grep -q '"ok"'
+          curl -fsS --retry 3 --retry-delay 5 -o /dev/null "$SITE/"
+          echo "deployed to $SITE"

@@ -15,6 +15,9 @@ no calendar or tasks yet.
 - [`docs/SPEC.md`](docs/SPEC.md) — the full technical specification.
 - [`docs/RUNBOOK-M0.md`](docs/RUNBOOK-M0.md) — first-run setup, including the
   two Google Cloud Console steps that have no API and cannot live in CDK.
+- [`docs/RUNBOOK-DEPLOY.md`](docs/RUNBOOK-DEPLOY.md) — one-time setup for the
+  deploy pipeline: the OIDC roles, the GitHub environments, and the
+  certificate.
 - [`CLAUDE.md`](CLAUDE.md) — implementation guidance and the invariants that
   are easy to get wrong.
 
@@ -33,9 +36,11 @@ moto.
 
 ## What is left in M0
 
-The domain (§16 decision 2). Route 53, ACM, CloudFront, and the production
-redirect URI all derive from it, and M0 is not done until you can sign in on
-your phone and see "connected" — which needs them.
+The first real deploy. `dev` needs no DNS and no certificate — it serves from
+its own CloudFront domain — so it can go out immediately. `prod` additionally
+needs the certificate for `sundial.mcmahongroup.org` and a DNS record at the
+registrar (§15.2). M0 is done when you can sign in on your phone and see
+"connected".
 
 ## Shape of the thing
 

@@ -1073,8 +1073,23 @@ That fact sets the security bar, single user or not.
   Destroying the app stack must never take data with it.
 - **Environments.** `dev` and `prod`, separate AWS accounts if convenient,
   separate Google OAuth clients regardless.
-- **CI/CD.** GitHub Actions: lint (`ruff`, `mypy`, `eslint`, `tsc`) → test →
-  `cdk diff` on PR → deploy on merge to `main` via OIDC role.
+- **CI/CD.** Two workflows. `CI` lints and tests on every push. `Deploy` runs
+  only after a successful `CI` on `main`, and is a separate workflow precisely
+  so that `id-token: write` — permission to mint AWS credentials — is never
+  held by the workflow that executes third-party test and lint code.
+
+  Deploy assumes an OIDC-federated role per environment, trusted on the
+  **GitHub Environment** rather than on a branch, so the approval gate is
+  enforced by AWS at `AssumeRoleWithWebIdentity` and not only by GitHub's UI.
+  The role holds no service permissions of its own: it may assume the CDK
+  bootstrap roles, read Sundial stack outputs, write the site bucket for its
+  own environment, and invalidate CloudFront. Nothing else.
+
+  `SundialApp` deploys automatically on `dev`. `SundialInfra` deploys only
+  when `cdk diff` reports a change, and then behind a second, reviewed
+  environment — durable resources are never changed silently, and an unchanged
+  stack never asks for an approval nobody needs to give. `prod` is reviewed in
+  full.
 - **Observability.** CloudWatch dashboard: sync lag, scheduler runtime, queue
   depth, DLQ depth, Google 4xx/5xx rate, LLM spend per day. Alarms on DLQ
   depth > 0, Google auth failure, scheduler p99 > 5s, and daily LLM spend
@@ -1148,16 +1163,42 @@ envelope-encrypted refresh token in `AUTH#google`; `GET /api/me` and
 `GET /api/auth/google/status`; the Vite PWA shell showing connection state;
 and CI running lint, test, and `cdk diff`.
 
-**M0b — needs the domain.** Route 53 hosted zone; the ACM certificate in
-`us-east-1`; the CloudFront distribution with S3 and the API Gateway as a
-second origin under `/api/*`; the production redirect URI; and the first real
-deploy. Only then is M0's "sign in on your phone and see connected" true.
+**M0b — the deployed article.** The CloudFront distribution with S3 and the
+API Gateway as a second origin under `/api/*`, the production redirect URI,
+and the first real deploy. Only then is M0's "sign in on your phone and see
+connected" true.
 
 The cookie is the reason M0b cannot be faked locally: §5.1's first-party
 session cookie depends on CloudFront serving the SPA and the API from one
 origin. Locally that is a Vite dev-server proxy, which is a *different*
 mechanism reaching the same place. It is close enough to build against and
 not close enough to call M0 done.
+
+### 15.2 DNS and the certificate
+
+The domain is **`sundial.mcmahongroup.org`**, and `mcmahongroup.org` is served
+by nameservers outside AWS. Two consequences, and neither is cosmetic.
+
+**There is no Route 53 hosted zone, and v0.2 was wrong to assume one.** DNS
+records — the CloudFront alias and the certificate's validation record — are
+added by hand at the registrar.
+
+**The ACM certificate is issued out of band and *referenced* by CDK, never
+created by it.** A DNS-validated certificate created inside a stack blocks that
+stack in `CREATE_IN_PROGRESS` until its validation `CNAME` resolves. With the
+zone outside AWS, CloudFormation cannot write that record and nothing else in
+the deployment can proceed, so a CI deploy hangs for the validation timeout and
+then rolls back. The certificate ARN is therefore configuration, supplied as
+CDK context from a GitHub variable. It still lives in `us-east-1`, because
+CloudFront accepts certificates from nowhere else.
+
+**`dev` has no hostname at all.** It serves from the distribution's own
+`*.cloudfront.net` domain, which is still a single origin and therefore still
+satisfies the first-party cookie requirement. So `dev` needs no DNS record, no
+certificate, and no registrar access, and can be deployed before any of the
+above exists. The one thing it cannot have is §12's TLS 1.2 floor: CloudFront
+only honours `MinimumProtocolVersion` on a distribution carrying its own
+certificate. That is acceptable for `dev` and is not for prod.
 
 ---
 
