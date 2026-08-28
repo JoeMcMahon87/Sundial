@@ -239,6 +239,7 @@ is coarse by design — item counts are in the thousands, not millions.
 |--------|----|----|-------|
 | Task | `USER#<uid>` | `TASK#<task_id>` | |
 | Event | `USER#<uid>` | `EVENT#<iso_start>#<event_id>` | SK sorts by time; range queries for a day/week are a single `Query` |
+| Calendar | `USER#<uid>` | `CAL#<google_calendar_id>` | discovered from `calendarList`; carries `is_sundial` and `primary` |
 | Project | `USER#<uid>` | `PROJ#<project_id>` | |
 | EmailCandidate | `USER#<uid>` | `EMAIL#<gmail_message_id>` | natural dedupe key |
 | Policy | `USER#<uid>` | `POLICY#v1` | |
@@ -247,6 +248,16 @@ is coarse by design — item counts are in the thousands, not millions.
 | OAuth tokens | `USER#<uid>` | `AUTH#google` | refresh token encrypted with KMS (§12) |
 | Idempotency | `USER#<uid>` | `IDEM#<key>` | request hash + stored response; `ttl` attribute, 24 h (§11) |
 | PushSub | `USER#<uid>` | `PUSH#<endpoint_hash>` | one row per browser (§9.1) |
+
+**Calendars are stored, not derived.** `(calendar_id, summary, primary,
+is_sundial, access_role, time_zone)`, refreshed from `calendarList` on every
+sync run. Three things need this row and none of them can reconstruct it:
+§6.1's "record the id of the `Sundial` calendar at first run", §3.1's
+`blocking_calendar_ids`, which is a policy selecting from a list that must
+therefore exist, and §6.5's invite-dedupe rule, which needs to know *which*
+calendar is primary in order to prefer its copy. `is_sundial` is matched on
+summary at creation time, because the id is precisely what is not yet known
+the first time discovery runs.
 
 **GSI1 — lookup by Google id.** `GSI1PK = GEVT#<google_event_id>`,
 `GSI1SK = <event_id>`. Needed on every inbound sync page to answer "do I

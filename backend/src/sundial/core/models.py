@@ -148,11 +148,11 @@ class Event:
 
 @dataclass(frozen=True, slots=True)
 class Calendar:
-    """A Google calendar Sundial knows about.
+    """A Google calendar Sundial knows about (§3.2).
 
-    §3.2's entity table has no Calendar row, but §6.1 requires recording the
-    id of the ``Sundial`` calendar and §3.1's ``blocking_calendar_ids``
-    presupposes a discovered list. The spec needs a row adding for this.
+    Refreshed from ``calendarList`` on every sync run. ``is_sundial`` is
+    matched on summary at creation time, because the id is precisely what is
+    not yet known the first time discovery runs.
     """
 
     calendar_id: str
