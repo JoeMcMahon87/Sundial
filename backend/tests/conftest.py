@@ -80,8 +80,19 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
                 {"AttributeName": "SK", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
+                {"AttributeName": name, "AttributeType": "S"}
+                for name in ("PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK")
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": index,
+                    "KeySchema": [
+                        {"AttributeName": f"{index}PK", "KeyType": "HASH"},
+                        {"AttributeName": f"{index}SK", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+                for index in ("GSI1", "GSI2")
             ],
         )
 

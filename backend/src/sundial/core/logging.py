@@ -20,6 +20,22 @@ _STANDARD = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) 
     "taskName",
 }
 
+# The names `logging.Logger.makeRecord` refuses to let `extra=` overwrite.
+_RESERVED = _STANDARD
+
+
+def extra(**fields: Any) -> dict[str, Any]:
+    """Build a safe ``extra=`` mapping for ``logging``.
+
+    ``LogRecord`` already owns attributes named ``created``, ``module``,
+    ``args``, ``name``, ``process`` and a dozen more, and passing one through
+    ``extra=`` raises ``KeyError`` inside ``makeRecord``. That turns a log line
+    into a crash at exactly the moment something interesting was happening —
+    a sync that created events, for instance. Colliding names are suffixed
+    rather than dropped, because losing the field silently is its own bug.
+    """
+    return {(f"{k}_" if k in _RESERVED else k): v for k, v in fields.items()}
+
 
 def set_correlation_id(value: str) -> None:
     _correlation_id.set(value)

@@ -11,6 +11,10 @@ dependencies = [
     "boto3>=1.40",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.10",
+    "python-ulid>=3.0",
+    # Lambda images carry zoneinfo data, but a slim container or a local
+    # Alpine box does not; §6.7 arithmetic silently degrades without it.
+    "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]

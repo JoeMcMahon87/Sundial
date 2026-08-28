@@ -62,9 +62,27 @@ def test_authorizer_reads_the_session_key_and_nothing_else(app_template: Templat
     assert not [a for a in actions if a.startswith("kms:")]
 
 
+def test_sync_cal_holds_the_key_but_not_the_session(app_template: Template) -> None:
+    """It calls Google, so it needs kms:Decrypt; it never mints or verifies a
+    session, so it must not be able to read the signing key."""
+    statements = _statements_for_role(app_template, _role_logical_id(app_template, "SyncCalFn"))
+    actions = _actions(statements)
+    assert "kms:Decrypt" in actions
+    assert "dynamodb:PutItem" in actions
+
+    session_secret_readers = json.dumps(
+        [
+            s
+            for s in statements
+            if "secretsmanager:GetSecretValue" in json.dumps(s.get("Action"))
+        ]
+    )
+    assert "SessionKey" not in session_secret_readers
+
+
 def test_every_function_is_arm64_on_python_313(app_template: Template) -> None:
     functions = app_template.find_resources("AWS::Lambda::Function")
-    assert len(functions) == 3
+    assert len(functions) == 4
     for resource in functions.values():
         assert resource["Properties"]["Architectures"] == ["arm64"]
         assert resource["Properties"]["Runtime"] == "python3.13"

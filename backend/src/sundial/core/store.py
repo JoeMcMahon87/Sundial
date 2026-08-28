@@ -12,6 +12,7 @@ import datetime as dt
 from typing import TYPE_CHECKING, Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 from sundial.core.config import settings
 
@@ -31,6 +32,10 @@ def sk_event(iso_start: str, event_id: str) -> str:
     """Event sort keys embed the start time, which is why a reschedule is a
     delete + put and never an update (§3.2, invariant 5)."""
     return f"EVENT#{iso_start}#{event_id}"
+
+
+def sk_calendar(calendar_id: str) -> str:
+    return f"CAL#{calendar_id}"
 
 
 def sk_policy() -> str:
@@ -75,3 +80,18 @@ def get(uid: str, sort_key: str) -> dict[str, Any] | None:
 
 def put(uid: str, sort_key: str, item: dict[str, Any]) -> None:
     table().put_item(Item={"PK": pk(uid), "SK": sort_key, **item})
+
+
+def query_prefix(uid: str, prefix: str) -> list[dict[str, Any]]:
+    """Every item whose sort key starts with ``prefix``, paged to exhaustion."""
+    items: list[dict[str, Any]] = []
+    kwargs: dict[str, Any] = {
+        "KeyConditionExpression": Key("PK").eq(pk(uid)) & Key("SK").begins_with(prefix),
+    }
+    while True:
+        response = table().query(**kwargs)
+        items.extend(response.get("Items", []))
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            return items
+        kwargs["ExclusiveStartKey"] = cursor

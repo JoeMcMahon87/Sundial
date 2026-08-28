@@ -48,8 +48,24 @@ scripts/    runbook helpers that cannot live in CDK
 docs/       SPEC.md, RUNBOOK-M0.md
 ```
 
-Only `api`, `core`, and `oauth` have code in them; the rest are empty packages
-waiting on their milestone.
+Only `api`, `core`, `oauth`, and `sync_cal` have code in them; the rest are
+empty packages waiting on their milestone.
+
+`sync_cal` covers M1 steps 1-3: discovery, the §6.2 pull loop, and event
+persistence. **The `origin = "sundial"` branches of §6.2 are deliberately
+absent** — they need `is_own_echo` (§6.4.1), which needs a write path, which is
+M3. Writing them now, without echo suppression, is the exact mistake invariant
+2 describes. `sync_calendar` counts those events as `skipped_sundial` and
+leaves them alone.
+
+Push (`events.watch`, the webhook, renewal, the safety-net rule) is M1 step 4
+and cannot be built locally: Google needs a publicly reachable HTTPS endpoint,
+so it is blocked on the domain along with M0b.
+
+Build structured-log extras with `slog.extra(...)`, never a bare dict.
+`LogRecord` owns names like `created` and `module`, and passing one through
+`extra=` raises `KeyError` inside `makeRecord` — the log line becomes a crash,
+at the moment something interesting was happening.
 
 ## Commands
 

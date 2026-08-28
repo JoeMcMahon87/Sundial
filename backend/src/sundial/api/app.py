@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from sundial.api import csrf, routes_auth, routes_me
+from sundial.api import csrf, routes_auth, routes_events, routes_me
 from sundial.core import errors
 from sundial.core import logging as slog
 
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
 
     errors.install(app)
     app.include_router(routes_auth.router)
+    app.include_router(routes_events.router)
     app.include_router(routes_me.router)
 
     @app.get("/health", include_in_schema=False)

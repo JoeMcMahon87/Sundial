@@ -112,6 +112,20 @@ class SundialApp(Stack):
         google_client_secret.grant_read(self.oauth_fn)
         key.grant_encrypt_decrypt(self.oauth_fn)
 
+        # `sync_cal` calls Google, so it needs the refresh token — which makes
+        # it the second and last function holding kms:Decrypt (§12). It gets no
+        # session key: it never mints or verifies a session.
+        self.sync_cal_fn = function(
+            "SyncCalFn",
+            "sundial.sync_cal.handler.handler",
+            SUNDIAL_GOOGLE_CLIENT_ID=google_client_id,
+            SUNDIAL_GOOGLE_CLIENT_SECRET_ARN=google_client_secret.secret_arn,
+            SUNDIAL_ALLOWED_GOOGLE_ACCOUNT_ID=allowed_account_id,
+        )
+        table.grant_read_write_data(self.sync_cal_fn)
+        google_client_secret.grant_read(self.sync_cal_fn)
+        key.grant_encrypt_decrypt(self.sync_cal_fn)
+
         authorizer = authorizers.HttpLambdaAuthorizer(
             "SessionAuthorizer",
             self.authorizer_fn,
@@ -135,4 +149,7 @@ class SundialApp(Stack):
             authorizer=authorizer,
         )
 
+        self.sync_cal_fn.add_environment("SUNDIAL_LOG_LEVEL", "INFO")
+
         CfnOutput(self, "ApiEndpoint", value=self.http_api.api_endpoint)
+        CfnOutput(self, "SyncCalFunctionName", value=self.sync_cal_fn.function_name)

@@ -30,3 +30,12 @@ def test_titles_are_truncated_not_logged_whole() -> None:
     assert long.startswith("Quarterly pl")
     assert "whole team" not in long
     assert slog.redact_title(None) == ""
+
+
+def test_extra_survives_names_logrecord_already_owns() -> None:
+    """`extra={"created": 2}` raises KeyError inside makeRecord, which turns a
+    log line into a crash at the exact moment a sync did something."""
+    logging.getLogger("sundial.test").info("synced", extra=slog.extra(created=2, calendar="x"))
+
+    safe = slog.extra(created=2, module="pull", calendar="primary")
+    assert safe == {"created_": 2, "module_": "pull", "calendar": "primary"}
