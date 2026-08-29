@@ -30,6 +30,8 @@ class SundialCicd(Stack):
         construct_id: str,
         *,
         repository: str,
+        repository_owner_id: str,
+        repository_id: str,
         **kwargs: Any,
     ):
         super().__init__(scope, construct_id, **kwargs)
@@ -50,7 +52,11 @@ class SundialCicd(Stack):
                     provider.open_id_connect_provider_arn,
                     {
                         "StringEquals": {f"{GITHUB_ISSUER}:aud": "sts.amazonaws.com"},
-                        "StringLike": {f"{GITHUB_ISSUER}:sub": _subjects(repository, env_name)},
+                        "StringLike": {
+                            f"{GITHUB_ISSUER}:sub": _subjects(
+                                repository, repository_owner_id, repository_id, env_name
+                            )
+                        },
                     },
                 ),
             )
@@ -115,7 +121,9 @@ class SundialCicd(Stack):
             CfnOutput(self, f"Deploy{env_name.title()}RoleArn", value=role.role_arn)
 
 
-def _subjects(repository: str, env_name: str) -> list[str]:
+def _subjects(
+    repository: str, repository_owner_id: str, repository_id: str, env_name: str
+) -> list[str]:
     """Which GitHub tokens may assume this role.
 
     Bound to **GitHub Environments**, not to a branch. That is the stronger
@@ -129,8 +137,23 @@ def _subjects(repository: str, env_name: str) -> list[str]:
     separately-gated `<env>-infra` environment. They are listed explicitly
     rather than matched with `dev*`, so a newly created environment does not
     silently inherit deploy rights.
+
+    The repository segment carries **immutable numeric ids**, not just names:
+    `repo:OWNER@OWNER-ID/REPO@REPO-ID:environment:ENV`. GitHub made this the
+    default for repositories created after 2026-07-15, and Sundial's was
+    created on 2026-08-19, so it has never issued a name-only subject — a
+    trust policy written the old way matches nothing and every deploy fails
+    with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, naming the
+    right role and giving no hint that the subject is the problem. Read the
+    ids from `/repos/{owner}/{repo}` rather than transcribing them.
+
+    Pinning them is also the point of the feature. Names can be renamed,
+    transferred and re-registered; ids cannot. A name-based policy trusts
+    whoever holds the name *next*.
     """
+    owner, _, repo = repository.partition("/")
+    prefix = f"repo:{owner}@{repository_owner_id}/{repo}@{repository_id}"
     return [
-        f"repo:{repository}:environment:{env_name}",
-        f"repo:{repository}:environment:{env_name}-infra",
+        f"{prefix}:environment:{env_name}",
+        f"{prefix}:environment:{env_name}-infra",
     ]

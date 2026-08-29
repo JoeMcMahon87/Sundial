@@ -6,6 +6,9 @@
   },
   "context": {
     "repository": "JoeMcMahon87/Sundial",
+    "//repository_ids": "GitHub OIDC subjects carry immutable ids since 2026-07-15; gh api repos/JoeMcMahon87/Sundial --jq .id,.owner.id",
+    "repository_owner_id": "14055195",
+    "repository_id": "1339893752",
 
     "//": "prod carries the custom hostname; dev uses the CloudFront domain and",
     "// ": "therefore needs neither DNS nor a certificate. Pass both on the",

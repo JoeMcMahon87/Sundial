@@ -8,6 +8,8 @@ from typing import Any
 from aws_cdk.assertions import Template
 
 REPO = "JoeMcMahon87/Sundial"
+SUBJECT_PREFIX = "repo:JoeMcMahon87@14055195/Sundial@1339893752"
+"""GitHub's immutable subject claim: name@id for both owner and repository."""
 
 
 def _roles(template: Template) -> dict[str, Any]:
@@ -68,8 +70,8 @@ def test_trust_is_scoped_to_this_repository_and_its_environments(
             "sts.amazonaws.com"
         )
         assert condition["StringLike"]["token.actions.githubusercontent.com:sub"] == [
-            f"repo:{REPO}:environment:{env_name}",
-            f"repo:{REPO}:environment:{env_name}-infra",
+            f"{SUBJECT_PREFIX}:environment:{env_name}",
+            f"{SUBJECT_PREFIX}:environment:{env_name}-infra",
         ]
 
 
@@ -78,9 +80,27 @@ def test_no_role_trusts_another_repository(cicd_template: Template) -> None:
     Sundial's roles must not repeat that: a wildcard means any repository in
     the namespace, including one created tomorrow, can assume them."""
     body = json.dumps(cicd_template.to_json())
-    assert f"repo:{REPO}:" in body
+    assert f"{SUBJECT_PREFIX}:" in body
     assert "repo:JoeMcMahon87/*" not in body
     assert ":environment:*" not in body
+
+
+def test_subjects_carry_the_immutable_repository_ids(cicd_template: Template) -> None:
+    """Repositories created after 2026-07-15 issue `repo:OWNER@ID/REPO@ID:...`
+    and never the name-only form. A policy written the old way matches no token
+    at all, and the resulting `Not authorized to perform
+    sts:AssumeRoleWithWebIdentity` names the correct role, so nothing in the
+    error points at the subject. Assert the shape rather than rediscovering it
+    from CloudTrail.
+    """
+    body = json.dumps(cicd_template.to_json())
+    assert f"repo:{REPO}:" not in body, "name-only subject matches no GitHub token"
+    for role in _roles(cicd_template).values():
+        subjects = role["Properties"]["AssumeRolePolicyDocument"]["Statement"][0]["Condition"][
+            "StringLike"
+        ]["token.actions.githubusercontent.com:sub"]
+        assert all(s.startswith(f"{SUBJECT_PREFIX}:") for s in subjects)
+        assert all("@" in s.split(":environment:")[0] for s in subjects)
 
 
 def test_prod_cannot_be_reached_from_the_dev_environment(cicd_template: Template) -> None:

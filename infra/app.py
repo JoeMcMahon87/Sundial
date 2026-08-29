@@ -31,6 +31,8 @@ SundialCicd(
     app,
     "SundialCicd",
     repository=app.node.try_get_context("repository") or "JoeMcMahon87/Sundial",
+    repository_owner_id=app.node.try_get_context("repository_owner_id") or "14055195",
+    repository_id=app.node.try_get_context("repository_id") or "1339893752",
     env=env,
 )
 

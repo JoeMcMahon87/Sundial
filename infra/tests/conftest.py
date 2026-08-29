@@ -34,6 +34,8 @@ def cicd_template() -> Template:
         App(),
         "SundialCicd",
         repository="JoeMcMahon87/Sundial",
+        repository_owner_id="14055195",
+        repository_id="1339893752",
         env=Environment(account="111122223333", region="us-east-1"),
     )
     del app
