@@ -15,6 +15,9 @@ no calendar or tasks yet.
 - [`docs/SPEC.md`](docs/SPEC.md) — the full technical specification.
 - [`docs/RUNBOOK-M0.md`](docs/RUNBOOK-M0.md) — first-run setup, including the
   two Google Cloud Console steps that have no API and cannot live in CDK.
+- [`docs/RUNBOOK-GOOGLE.md`](docs/RUNBOOK-GOOGLE.md) — the Google Cloud Console
+  setup in full: scopes, the two OAuth clients, and the publishing-status
+  change that no API can make for you.
 - [`docs/RUNBOOK-DEPLOY.md`](docs/RUNBOOK-DEPLOY.md) — one-time setup for the
   deploy pipeline: the OIDC roles, the GitHub environments, and the
   certificate.

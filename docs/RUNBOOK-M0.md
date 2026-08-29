@@ -5,6 +5,10 @@ file exists rather than being a `make` target.
 
 ## 1. Google Cloud Console — manual, before anything else
 
+**Full walkthrough: [`RUNBOOK-GOOGLE.md`](RUNBOOK-GOOGLE.md).** The summary below
+is the shape of it; that file has the console navigation, the verification
+checklist, and what each failure mode looks like.
+
 Per §16 decision 1 the publishing path is **option A: Production, unverified**.
 Do this for **both** the `dev` and the `prod` OAuth client. A client left in
 "Testing" issues refresh tokens that expire after **7 days**, and the resulting
