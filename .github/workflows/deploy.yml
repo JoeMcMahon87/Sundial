@@ -84,6 +84,13 @@ jobs:
         env:
           TARGET: ${{ steps.target.outputs.environment }}
         run: |
+          # Synthesise first. `cdk diff --fail` exits non-zero both for "there
+          # are differences" and for "synth blew up", and reading the second as
+          # the first requests an approval to a diff nobody was shown.
+          PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 synth -c env="$TARGET" \
+            -c domain_name="${{ vars.SITE_DOMAIN_NAME }}" \
+            -c certificate_arn="${{ vars.SITE_CERTIFICATE_ARN }}" > /dev/null
+
           set +e
           PATH=".venv/bin:$PATH" npx --yes aws-cdk@2 diff \
             "SundialInfra-$TARGET" -c env="$TARGET" --fail
@@ -116,13 +123,27 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
-          cache-dependency-glob: infra/pyproject.toml
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            infra/pyproject.toml
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - working-directory: infra
+
+      # cdk synthesises the whole app whichever stack is named, and SundialApp
+      # reads its Lambda asset from disk, so deploying the durable stack needs
+      # the backend built too. Without it synth raises "Cannot find asset" and
+      # the job fails before reaching CloudFormation.
+      - name: Build the Lambda asset
+        working-directory: backend
+        run: uv venv --python 3.13 && ./build.sh
+
+      - name: Install CDK dependencies
+        working-directory: infra
         run: uv venv --python 3.13 && uv pip install -e ".[dev]"
-      - working-directory: infra
+
+      - name: Deploy SundialInfra
+        working-directory: infra
         env:
           TARGET: ${{ needs.plan.outputs.environment }}
         run: |
