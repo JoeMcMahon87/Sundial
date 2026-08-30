@@ -146,6 +146,18 @@ class SundialApp(Stack):
             methods=[apigw.HttpMethod.ANY],
             integration=integrations.HttpLambdaIntegration("OauthIntegration", self.oauth_fn),
         )
+        # `GET /api/health` is unauthenticated too. A liveness probe behind a
+        # user session cannot answer the question it exists to answer, and this
+        # is the only functional check the deploy pipeline has: with the
+        # authorizer in front of it a broken handler is indistinguishable from
+        # a missing cookie, which is exactly how a Lambda that could not import
+        # its own dependencies reached a CREATE_COMPLETE stack. It returns
+        # `{"status": "ok"}` and nothing else (§5.1 step 4).
+        self.http_api.add_routes(
+            path="/api/health",
+            methods=[apigw.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("HealthIntegration", self.api_fn),
+        )
         self.http_api.add_routes(
             path="/api/{proxy+}",
             methods=[apigw.HttpMethod.ANY],

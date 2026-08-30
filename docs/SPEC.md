@@ -383,7 +383,11 @@ Single user, so this stays small:
    apex domain. Because the API is served under the same origin via
    CloudFront, this is a first-party cookie and survives on iOS Safari.
 4. A Lambda authorizer validates the JWT on every `/api/*` call and caches
-   the result for 300s.
+   the result for 300s. Two routes are exempt: `/api/auth/*`, which is how a
+   session comes to exist, and `GET /api/health`, which returns
+   `{"status": "ok"}` and nothing else. The second is a deliberate hole: it is
+   what the deploy pipeline smoke-tests, and a liveness probe that requires a
+   session cannot distinguish a broken handler from a missing cookie.
 
 Cognito is deliberately not used. It buys user-pool management this app has
 no use for, and the Google refresh token still has to be handled separately

@@ -31,6 +31,11 @@ rm -rf "$out"/boto3 "$out"/botocore "$out"/dateutil "$out"/s3transfer
 cp -r "$here/src/sundial" "$out/sundial"
 
 find "$out" -name "__pycache__" -type d -prune -exec rm -rf {} +
-find "$out" -name "*.dist-info" -type d -prune -exec rm -rf {} +
+
+# `*.dist-info` stays. python-ulid reads its own version through
+# importlib.metadata at import time, so deleting the metadata turns `from ulid
+# import ULID` into "No package metadata was found for python-ulid" - a
+# Runtime.ImportModuleError that kills the whole handler, not just the version
+# lookup. The directories are a few KB; this is not where the size is.
 
 echo "built $out ($(du -sh "$out" | cut -f1))"

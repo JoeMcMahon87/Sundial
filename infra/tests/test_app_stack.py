@@ -116,6 +116,11 @@ def test_auth_routes_are_unauthenticated_and_the_rest_are_not(app_template: Temp
     assert routes["ANY /api/auth/{proxy+}"].get("AuthorizationType", "NONE") == "NONE"
     assert routes["ANY /api/{proxy+}"]["AuthorizationType"] == "CUSTOM"
 
+    # The liveness probe is the third case (§5.1 step 4). Behind the authorizer
+    # it answers 401 whatever the handler is doing, which makes the deploy
+    # smoke test blind to the failure it exists to catch.
+    assert routes["GET /api/health"].get("AuthorizationType", "NONE") == "NONE"
+
 
 def test_authorizer_caches_against_the_cookie(app_template: Template) -> None:
     app_template.has_resource_properties(
